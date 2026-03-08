@@ -1,4 +1,5 @@
 from __future__ import annotations
+import json
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 from enum import Enum
@@ -171,6 +172,58 @@ class Owner:
             f"{self.name} | {self.available_minutes} min available | "
             f"{len(self.pets)} pet(s)"
         )
+
+    # -- persistence -------------------------------------------------------
+
+    def save_to_json(self, filepath: str = "pawpal_data.json") -> None:
+        """Serialise the owner, all pets, and all tasks to a JSON file."""
+        data = {
+            "name": self.name,
+            "available_minutes": self.available_minutes,
+            "pets": [
+                {
+                    "name": pet.name,
+                    "species": pet.species,
+                    "tasks": [
+                        {
+                            "title": task.title,
+                            "duration_minutes": task.duration_minutes,
+                            "priority": task.priority.name,
+                            "frequency": task.frequency.value,
+                            "completed": task.completed,
+                            "time_of_day": task.time_of_day,
+                            "due_date": task.due_date.isoformat(),
+                        }
+                        for task in pet.tasks
+                    ],
+                }
+                for pet in self.pets
+            ],
+        }
+        with open(filepath, "w") as f:
+            json.dump(data, f, indent=2)
+
+    @classmethod
+    def load_from_json(cls, filepath: str = "pawpal_data.json") -> Owner:
+        """Reconstruct an Owner (with all pets and tasks) from a file saved by save_to_json."""
+        with open(filepath) as f:
+            data = json.load(f)
+        owner = cls(name=data["name"], available_minutes=data["available_minutes"])
+        for pet_data in data.get("pets", []):
+            pet = Pet(name=pet_data["name"], species=pet_data["species"])
+            for td in pet_data.get("tasks", []):
+                task = Task(
+                    title=td["title"],
+                    duration_minutes=td["duration_minutes"],
+                    priority=Priority[td["priority"]],
+                    frequency=Frequency(td["frequency"]),
+                    completed=td["completed"],
+                    time_of_day=td["time_of_day"],
+                    due_date=date.fromisoformat(td["due_date"]),
+                )
+                pet.add_task(task)
+            owner.add_pet(pet)
+        return owner
 
 
 # ---------------------------------------------------------------------------

@@ -1,5 +1,11 @@
+import os
 import streamlit as st
 from pawpal_system import Owner, Pet, Task, Scheduler, Priority, Frequency, DailyPlan
+
+SAVE_FILE = "pawpal_data.json"
+
+# Emoji badge for each Priority level — used in every task display
+PRIORITY_EMOJI = {"HIGH": "🔴", "MEDIUM": "🟡", "LOW": "🟢"}
 
 st.set_page_config(page_title="PawPal+", page_icon="🐾", layout="centered")
 st.title("🐾 PawPal+")
@@ -9,7 +15,13 @@ st.title("🐾 PawPal+")
 # ---------------------------------------------------------------------------
 
 if "owner" not in st.session_state:
-    st.session_state.owner = None
+    if os.path.exists(SAVE_FILE):
+        try:
+            st.session_state.owner = Owner.load_from_json(SAVE_FILE)  # <-- Owner.load_from_json()
+        except Exception:
+            st.session_state.owner = None
+    else:
+        st.session_state.owner = None
 
 # ---------------------------------------------------------------------------
 # Section 1 – Owner & first pet profile
@@ -30,6 +42,7 @@ if save_profile:
     owner = Owner(name=owner_name, available_minutes=int(available_mins))
     owner.add_pet(pet)                          # <-- Owner.add_pet()
     st.session_state.owner = owner
+    owner.save_to_json(SAVE_FILE)               # <-- Owner.save_to_json()
     st.success(f"Profile saved — {owner_name} with {pet_name} ({species}), {available_mins} min available.")
 
 # Guard: nothing below renders until a profile exists
@@ -54,6 +67,7 @@ with st.expander("Add another pet"):
             st.warning(f"A pet named '{new_pet_name}' already exists.")
         else:
             owner.add_pet(Pet(name=new_pet_name, species=new_pet_species))  # <-- Owner.add_pet()
+            owner.save_to_json(SAVE_FILE)             # <-- Owner.save_to_json()
             st.success(f"Added {new_pet_name} ({new_pet_species}).")
 
 # Show pets registered so far
@@ -85,6 +99,7 @@ if add_task and target_pet is not None:
     target_pet.add_task(                            # <-- Pet.add_task()
         Task(title=task_title, duration_minutes=int(duration), priority=Priority[priority_str])
     )
+    owner.save_to_json(SAVE_FILE)                   # <-- Owner.save_to_json()
     st.success(f"Added '{task_title}' to {target_name}.")
 
 # -- Current task table with mark-complete + remove -------------------------
@@ -95,18 +110,21 @@ if all_tasks:
         col_info, col_done, col_del = st.columns([5, 1, 1])
         with col_info:
             status = "✓" if task.completed else "○"
+            badge = PRIORITY_EMOJI[task.priority.name]
             st.markdown(
-                f"{status} **[{pet.name}]** {task.title} — "
+                f"{status} {badge} **[{pet.name}]** {task.title} — "
                 f"{task.duration_minutes} min | {task.priority.name}"
             )
         with col_done:
             if not task.completed:
                 if st.button("Done", key=f"done_{i}"):
                     task.mark_complete()            # <-- Task.mark_complete()
+                    owner.save_to_json(SAVE_FILE)   # <-- Owner.save_to_json()
                     st.rerun()
         with col_del:
             if st.button("✕", key=f"del_{i}"):
                 pet.remove_task(task.title)         # <-- Pet.remove_task()
+                owner.save_to_json(SAVE_FILE)       # <-- Owner.save_to_json()
                 st.rerun()
 else:
     st.info("No tasks yet. Add one above.")
@@ -118,6 +136,7 @@ if pending_sorted:
     with st.expander("View pending tasks sorted by priority"):
         rows = [
             {
+                "": PRIORITY_EMOJI[task.priority.name],
                 "Pet": pet.name,
                 "Task": task.title,
                 "Priority": task.priority.name,
@@ -150,6 +169,7 @@ if conflicts:
 if st.button("Reset all daily tasks (new day)"):
     for pet in owner.pets:
         pet.reset_daily_tasks()                     # <-- Pet.reset_daily_tasks()
+    owner.save_to_json(SAVE_FILE)                   # <-- Owner.save_to_json()
     st.success("All daily tasks reset.")
     st.rerun()
 
@@ -190,6 +210,7 @@ if st.button("Generate schedule"):
         for pet, task in plan.scheduled:
             cumulative += task.duration_minutes
             rows.append({
+                "": PRIORITY_EMOJI[task.priority.name],
                 "Pet": pet.name,
                 "Task": task.title,
                 "Priority": task.priority.name,
@@ -208,7 +229,8 @@ if st.button("Generate schedule"):
     if plan.skipped:
         st.subheader("Skipped tasks")
         for pet, task, reason in plan.skipped:
+            badge = PRIORITY_EMOJI[task.priority.name]
             st.warning(
-                f"**[{pet.name}] {task.title}** skipped — {reason}\n\n"
+                f"{badge} **[{pet.name}] {task.title}** ({task.priority.name}) skipped — {reason}\n\n"
                 "_Consider reducing this task's duration or freeing up more time._"
             )
