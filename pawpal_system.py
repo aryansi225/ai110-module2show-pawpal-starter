@@ -1,5 +1,6 @@
 from __future__ import annotations
 from dataclasses import dataclass, field
+from datetime import date, timedelta
 from enum import Enum
 
 
@@ -31,6 +32,8 @@ class Task:
     priority: Priority
     frequency: Frequency = Frequency.DAILY
     completed: bool = False
+    time_of_day: str = "anytime"       # "HH:MM" (e.g. "07:30") or "anytime"
+    due_date: date = field(default_factory=date.today)
 
     def mark_complete(self) -> None:
         """Mark this task as done for the current day."""
@@ -40,12 +43,31 @@ class Task:
         """Clear completion status (e.g. at the start of a new day)."""
         self.completed = False
 
+    def next_occurrence(self) -> Task | None:
+        """Return a fresh incomplete copy due tomorrow (DAILY), next week (WEEKLY), or None (AS_NEEDED)."""
+        if self.frequency == Frequency.DAILY:
+            next_due = self.due_date + timedelta(days=1)
+        elif self.frequency == Frequency.WEEKLY:
+            next_due = self.due_date + timedelta(weeks=1)
+        else:
+            return None  # AS_NEEDED tasks don't recur automatically
+
+        return Task(
+            title=self.title,
+            duration_minutes=self.duration_minutes,
+            priority=self.priority,
+            frequency=self.frequency,
+            time_of_day=self.time_of_day,
+            due_date=next_due,
+        )
+
     def __str__(self) -> str:
         """Return a one-line human-readable summary of the task."""
         status = "✓" if self.completed else "○"
+        time_label = f"@{self.time_of_day}" if self.time_of_day != "anytime" else "anytime"
         return (
             f"[{status}] {self.title} | {self.duration_minutes} min | "
-            f"{self.priority.name} | {self.frequency.value}"
+            f"{self.priority.name} | {time_label} | due {self.due_date}"
         )
 
 
@@ -269,16 +291,108 @@ class Scheduler:
 
         return plan
 
-    def mark_task_complete(self, pet_name: str, task_title: str) -> bool:
-        """Find a task by pet + title and mark it complete. Returns True if found."""
+    def mark_task_complete(self, pet_name: str, task_title: str) -> Task | None:
+        """
+        Mark a task complete and, for DAILY/WEEKLY tasks, append the next
+        occurrence to the pet's task list automatically.
+
+        Returns the newly created next-occurrence Task, or None if the task
+        was AS_NEEDED (no recurrence) or not found.
+        """
         pet = self.owner.get_pet(pet_name)
         if pet is None:
-            return False
+            return None
         for task in pet.tasks:
-            if task.title.lower() == task_title.lower():
+            if task.title.lower() == task_title.lower() and not task.completed:
                 task.mark_complete()
-                return True
-        return False
+                next_task = task.next_occurrence()  # None for AS_NEEDED
+                if next_task is not None:
+                    pet.add_task(next_task)
+                return next_task
+        return None
+
+    def sort_by_time(self) -> list[tuple[Pet, Task]]:
+        """Return all tasks sorted chronologically by time_of_day; 'anytime' tasks sort last."""
+        return sorted(
+            self.owner.all_tasks(),
+            key=lambda pt: (pt[1].time_of_day == "anytime", pt[1].time_of_day),
+        )
+
+    def tasks_sorted_by_duration(self, ascending: bool = True) -> list[tuple[Pet, Task]]:
+        """Return all pending tasks sorted by duration (shortest or longest first)."""
+        pairs = self.owner.all_pending_tasks()
+        return sorted(pairs, key=lambda pt: pt[1].duration_minutes, reverse=not ascending)
+
+    def filter_by_pet(self, pet_name: str) -> list[Task]:
+        """Return all tasks (any status) belonging to the named pet."""
+        pet = self.owner.get_pet(pet_name)
+        return pet.tasks if pet else []
+
+    def filter_by_status(self, completed: bool) -> list[tuple[Pet, Task]]:
+        """Return (pet, task) pairs filtered by completion status."""
+        return [
+            (pet, task)
+            for pet, task in self.owner.all_tasks()
+            if task.completed == completed
+        ]
+
+    def due_today(self) -> list[tuple[Pet, Task]]:
+        """Return pending tasks whose frequency makes them due every day."""
+        return [
+            (pet, task)
+            for pet, task in self.owner.all_pending_tasks()
+            if task.frequency == Frequency.DAILY
+        ]
+
+    def detect_conflicts(self) -> list[str]:
+        """Return warning strings for time overload, impossible tasks, duplicate titles, and time-slot clashes."""
+        conflicts: list[str] = []
+        available = self.owner.available_minutes
+
+        total_pending = self.owner.total_pending_minutes()
+        if total_pending > available:
+            conflicts.append(
+                f"Time overload: {total_pending} min of tasks but only "
+                f"{available} min available — "
+                f"{total_pending - available} min will be skipped."
+            )
+
+        for pet, task in self.owner.all_pending_tasks():
+            if task.duration_minutes > available:
+                conflicts.append(
+                    f"Impossible task: [{pet.name}] '{task.title}' needs "
+                    f"{task.duration_minutes} min but the entire day is only {available} min."
+                )
+
+        for pet in self.owner.pets:
+            seen: set[str] = set()
+            for task in pet.tasks:
+                key = task.title.lower()
+                if key in seen:
+                    conflicts.append(
+                        f"Duplicate task on {pet.name}: '{task.title}' appears more than once."
+                    )
+                seen.add(key)
+
+        # Time clash detection — group all pending timed tasks by time_of_day,
+        # then warn for any slot that has more than one task.
+        # Uses a dict[time_slot -> list[(pet_name, task_title)]] so the warning
+        # message can name exactly which tasks collide without raising an error.
+        time_slots: dict[str, list[tuple[str, str]]] = {}
+        for pet, task in self.owner.all_pending_tasks():
+            if task.time_of_day == "anytime":
+                continue  # unscheduled tasks can't clash
+            slot = task.time_of_day
+            time_slots.setdefault(slot, []).append((pet.name, task.title))
+
+        for slot, entries in time_slots.items():
+            if len(entries) > 1:
+                names = ", ".join(f"[{p}] {t}" for p, t in entries)
+                conflicts.append(
+                    f"Time clash at {slot}: {len(entries)} tasks overlap — {names}"
+                )
+
+        return conflicts
 
     def summary(self) -> str:
         """Return a one-line status string showing available time and pending workload."""

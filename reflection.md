@@ -59,13 +59,23 @@ The design has not yet changed from the initial version — implementation is st
 
 **a. Constraints and priorities**
 
-- What constraints does your scheduler consider (for example: time, priority, preferences)?
-- How did you decide which constraints mattered most?
+The scheduler considers three constraints, applied in this order:
+
+1. **Task priority** (`HIGH → MEDIUM → LOW`) — the primary sort key. A HIGH-priority task like medication will always be considered before a LOW-priority play session, regardless of duration.
+2. **Duration as a tiebreaker** — when two tasks share the same priority, the shorter one is scheduled first. This is a "shortest job first" heuristic that maximises the number of tasks that fit within the time budget.
+3. **Available minutes** — the hard budget. Any task that would push the running total over `owner.available_minutes` is skipped and listed in the `DailyPlan.skipped` list with a reason.
+
+Priority was chosen as the primary constraint because a busy pet owner's first concern is "did the critical things get done?" — not "did I finish the most tasks?". Duration is secondary because it helps pack more tasks into the remaining time after high-priority items are placed.
 
 **b. Tradeoffs**
 
-- Describe one tradeoff your scheduler makes.
-- Why is that tradeoff reasonable for this scenario?
+**Tradeoff: exact time-slot matching vs. overlap-aware scheduling**
+
+The time-clash detector (`detect_conflicts`) flags two tasks as conflicting only when their `time_of_day` strings are *identical* (e.g., both `"07:30"`). It does **not** check whether a 30-minute task starting at `"07:00"` would still be running when a second task starts at `"07:20"`.
+
+This means a genuine overlap — Morning walk `07:00` for 30 min + Litter box clean `07:20` for 10 min — is silently permitted, even though the owner would need to be in two places at once.
+
+**Why this tradeoff is reasonable here:** Implementing full overlap detection requires converting every `"HH:MM"` string into a `datetime` interval and checking all pairs for intersection — O(n²) comparisons and significantly more code complexity. For a single-owner pet care app where tasks are short and the owner is the judge of what is actually feasible, warning on exact-slot collisions catches the most obvious data-entry errors (accidentally entering the same time twice) without over-engineering the solution. A future iteration could add interval arithmetic using `datetime` objects if the app grows to support multiple caregivers or longer tasks.
 
 ---
 
