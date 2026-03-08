@@ -111,6 +111,41 @@ if all_tasks:
 else:
     st.info("No tasks yet. Add one above.")
 
+# -- Sorted pending tasks view -----------------------------------------------
+scheduler_preview = Scheduler(owner)                # <-- Scheduler.__init__()
+pending_sorted = scheduler_preview.pending_tasks_by_priority()  # <-- Scheduler.pending_tasks_by_priority()
+if pending_sorted:
+    with st.expander("View pending tasks sorted by priority"):
+        rows = [
+            {
+                "Pet": pet.name,
+                "Task": task.title,
+                "Priority": task.priority.name,
+                "Duration (min)": task.duration_minutes,
+                "Time of Day": task.time_of_day,
+            }
+            for pet, task in pending_sorted
+        ]
+        st.dataframe(rows, use_container_width=True, hide_index=True)
+
+# -- Conflict warnings -------------------------------------------------------
+conflicts = scheduler_preview.detect_conflicts()    # <-- Scheduler.detect_conflicts()
+if conflicts:
+    st.markdown("**Scheduling conflicts detected:**")
+    for conflict in conflicts:
+        if "Impossible task" in conflict:
+            st.error(f"**Cannot schedule:** {conflict}")
+        elif "Time clash" in conflict:
+            st.warning(
+                f"**Time clash:** {conflict}\n\n"
+                "_Two tasks are assigned the same start time. "
+                "Edit one task's time-of-day to resolve._"
+            )
+        elif "Duplicate task" in conflict:
+            st.warning(f"**Duplicate:** {conflict}")
+        else:
+            st.warning(f"**Warning:** {conflict}")
+
 # -- Reset daily tasks -------------------------------------------------------
 if st.button("Reset all daily tasks (new day)"):
     for pet in owner.pets:
@@ -129,27 +164,51 @@ if st.button("Generate schedule"):
     scheduler = Scheduler(owner)                    # <-- Scheduler.__init__()
     plan      = scheduler.build_plan()              # <-- Scheduler.build_plan()
 
-    st.markdown(f"**{scheduler.summary()}**")       # <-- Scheduler.summary()
+    st.info(scheduler.summary())                    # <-- Scheduler.summary()
+
+    # Show any conflicts prominently before the plan so the owner can act on them
+    conflicts = scheduler.detect_conflicts()        # <-- Scheduler.detect_conflicts()
+    for conflict in conflicts:
+        if "Impossible task" in conflict:
+            st.error(f"Cannot schedule: {conflict}")
+        elif "Time clash" in conflict:
+            st.warning(
+                f"**Time clash warning:** {conflict}\n\n"
+                "_Edit one of the conflicting tasks' time-of-day to resolve._"
+            )
+        elif "Duplicate task" in conflict:
+            st.warning(f"Duplicate task detected: {conflict}")
+        else:
+            st.warning(conflict)
+
     st.divider()
 
     if plan.scheduled:
-        st.subheader("Scheduled")
+        st.subheader("Scheduled tasks")
         cumulative = 0
+        rows = []
         for pet, task in plan.scheduled:
             cumulative += task.duration_minutes
-            st.markdown(
-                f"- **[{pet.name}]** {task.title} — "
-                f"{task.duration_minutes} min | priority: {task.priority.name} | "
-                f"running total: {cumulative} min"
-            )
+            rows.append({
+                "Pet": pet.name,
+                "Task": task.title,
+                "Priority": task.priority.name,
+                "Duration (min)": task.duration_minutes,
+                "Running Total (min)": cumulative,
+                "Time of Day": task.time_of_day,
+            })
+        st.table(rows)
+        st.success(
+            f"Scheduled {len(plan.scheduled)} task(s) — "
+            f"{plan.total_minutes()} / {owner.available_minutes} min used."  # <-- DailyPlan.total_minutes()
+        )
     else:
         st.warning("No tasks fit within the available time.")
 
     if plan.skipped:
-        st.subheader("Skipped")
+        st.subheader("Skipped tasks")
         for pet, task, reason in plan.skipped:
-            st.markdown(f"- **[{pet.name}]** {task.title} — _{reason}_")
-
-    st.caption(
-        f"Total scheduled: {plan.total_minutes()} / {owner.available_minutes} min"  # <-- DailyPlan.total_minutes()
-    )
+            st.warning(
+                f"**[{pet.name}] {task.title}** skipped — {reason}\n\n"
+                "_Consider reducing this task's duration or freeing up more time._"
+            )
