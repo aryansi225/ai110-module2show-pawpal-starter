@@ -57,3 +57,28 @@ Beyond the basic greedy planner, PawPal+ includes several advanced scheduling fe
 - **Time-slot clash** — two or more tasks share an identical `time_of_day` value.
 
 **Filtering** — `filter_by_pet()` and `filter_by_status()` let the UI (or tests) query tasks by owner, pet name, or completion state without rebuilding the full plan.
+
+## Testing PawPal+
+
+Run the full test suite with:
+
+```bash
+python -m pytest
+```
+
+### What the tests cover
+
+The 27 tests in `tests/test_pawpal.py` verify the most critical scheduling behaviours across three categories:
+
+- **Task lifecycle** — defaults, `mark_complete()`, `reset()`, and idempotency (marking an already-completed task does nothing).
+- **Recurring tasks** — `next_occurrence()` produces a fresh incomplete copy due +1 day (DAILY) or +7 days (WEEKLY); `AS_NEEDED` returns `None`. Completing a recurring task via `Scheduler.mark_task_complete()` automatically enqueues the next occurrence.
+- **Pet task management** — `add_task()`, `remove_task()` (returns `True`/`False`), `get_pending_tasks()`, and `reset_daily_tasks()` (clears DAILY only, leaves WEEKLY untouched).
+- **Scheduler — happy paths** — greedy planner skips tasks that exceed remaining time, schedules HIGH-priority tasks before LOW, and ignores already-completed tasks.
+- **Scheduler — edge cases** — empty owner, pet with no tasks, and the full `detect_conflicts()` suite: time overload, impossible task, duplicate titles, time-slot clashes, and `"anytime"` tasks that never clash.
+- **Sorting** — `sort_by_time()` orders `"HH:MM"` tasks chronologically with `"anytime"` tasks last, and preserves insertion order when all tasks are `"anytime"`.
+
+### Confidence level
+
+★★★★★ (5 / 5)
+
+All 27 tests pass. Every public method on `Task`, `Pet`, and `Scheduler` is exercised by at least one test, including the trickiest edge cases (idempotent completion, recurring-task re-queuing, and multi-pet conflict detection). The only known gap is overlap-aware scheduling (a 30-min task at `07:00` overlapping a task at `07:20`) — this is a documented design tradeoff, not a defect.
