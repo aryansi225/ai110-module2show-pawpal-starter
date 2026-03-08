@@ -4,13 +4,54 @@
 
 **a. Initial design**
 
-- Briefly describe your initial UML design.
-- What classes did you include, and what responsibilities did you assign to each?
+The initial design centers on four classes with clear, separated responsibilities:
+
+- **`Owner`** — stores the owner's name and total time available per day (in minutes). Acts as the entry point for a planning session.
+- **`Pet`** — stores the pet's name and species. Owned by an `Owner` (composition).
+- **`Task`** — represents a single care activity with a title, duration in minutes, and a priority level (`low`, `medium`, `high`). Pure data class; no scheduling logic.
+- **`Scheduler`** — receives an `Owner` (and their `Pet`) plus a list of `Task` objects. Its `build_plan()` method applies constraints (total available time, task priority) to select and order tasks, returning a `DailyPlan`.
+- **`DailyPlan`** — holds the ordered list of scheduled tasks and a human-readable explanation of why each task was included or excluded.
+
+```mermaid
+classDiagram
+    class Owner {
+        +str name
+        +int available_minutes
+        +Pet pet
+    }
+
+    class Pet {
+        +str name
+        +str species
+    }
+
+    class Task {
+        +str title
+        +int duration_minutes
+        +str priority
+    }
+
+    class Scheduler {
+        +Owner owner
+        +list~Task~ tasks
+        +build_plan() DailyPlan
+    }
+
+    class DailyPlan {
+        +list~Task~ scheduled_tasks
+        +list~str~ explanations
+        +display() str
+    }
+
+    Owner "1" *-- "1" Pet : has
+    Scheduler "1" --> "1" Owner : uses
+    Scheduler "1" --> "0..*" Task : schedules
+    Scheduler ..> DailyPlan : creates
+```
 
 **b. Design changes**
 
-- Did your design change during implementation?
-- If yes, describe at least one change and why you made it.
+The design has not yet changed from the initial version — implementation is still in progress. One anticipated change is splitting `priority` out of `Task` into a separate `Priority` enum (`LOW`, `MEDIUM`, `HIGH`) so comparisons in the scheduler are type-safe rather than string-based. Another likely change is adding a `time_of_day` preference field to `Task` (e.g., `morning`, `afternoon`, `anytime`) once time-slot ordering becomes a requirement.
 
 ---
 
